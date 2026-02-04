@@ -76,7 +76,7 @@ def format_ocr_results_sklearn(results):
     Extract structured test rows using sklearn for column clustering and classification.
     """
     # Parameters
-    x_threshold = 20  # Equivalent to 'eps' in DBSCAN
+    x_threshold = 100  # Equivalent to 'eps' in DBSCAN
     y_threshold = 12  
     
     # 1. Flatten results -> list of items
@@ -121,6 +121,8 @@ def format_ocr_results_sklearn(results):
     
     # Find unique cluster labels
     unique_labels = set(clustering.labels_)
+    if len(unique_labels) > 4:
+        raise ValueError(f"Too many distinct columns detected; expected at most 4. Found: {len(unique_labels)}")
     
     # Calculate the center (mean x) of each cluster
     cluster_centers = []
@@ -145,8 +147,8 @@ def format_ocr_results_sklearn(results):
     
     # Handle dynamic column counts (fallback logic)
     if len(cluster_centers) == 3:
-        # Custom mapping for 3 columns: Name, Result, Range (skip units)
-        semantic_map = ["test_name", "result", "range"]
+        # Custom mapping for 3 columns: Name, Result, Units
+        semantic_map = ["test_name", "result", "units"]
     elif len(cluster_centers) == 2:
         semantic_map = ["test_name", "result"]
     else:
@@ -252,11 +254,7 @@ async def ocr_llm_pipeline(report_id: str):
             if not current_page_list:
                 continue
                 
-            page_image = current_page_list[0]
-
-            # img_byte_arr = io.BytesIO()
-            # page_image.save(img_byte_arr, format="JPEG")
-            # img_bytes = img_byte_arr.getvalue()
+            page_image = current_page_list[0] 
             img_array = np.array(page_image)
 
             try:
@@ -277,7 +275,20 @@ async def ocr_llm_pipeline(report_id: str):
     except Exception as e:
         print(f"Error processing PDF: {e}")
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
-
+    
+    try:
+        results = await fastapi.concurrency.run_in_threadpool(
+            format_ocr_results_sklearn, 
+            results
+        )
+        print("Clustering and formatting completed.")
+    except Exception as e:
+        print(f"Error during clustering/formatting: {e}")
+        raise HTTPException(status_code=500, detail=f"Clustering/formatting failed: {str(e)}")
+    # results = await fastapi.concurrency.run_in_threadpool(
+    #     format_ocr_results_sklearn,
+    #     results
+    # )
     return {
         "status": "paddle ocr success",
         "task_id": report_id,
